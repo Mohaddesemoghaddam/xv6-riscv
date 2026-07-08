@@ -4,6 +4,7 @@
 #include "riscv.h"
 #include "spinlock.h"
 #include "proc.h"
+#include "pinfo.h"
 #include "defs.h"
 
 struct cpu cpus[NCPU];
@@ -123,6 +124,8 @@ allocproc(void)
 
 found:
   p->pid = allocpid();
+  p->priority = 50;
+  p->tickets = 1;
   p->state = USED;
 
   // Allocate a trapframe page.
@@ -689,4 +692,39 @@ procdump(void)
     printk("%d %s %s", p->pid, state, p->name);
     printk("\n");
   }
+}
+
+int
+getpinfo(struct pinfo *info)
+{
+  struct proc *p;
+  int i = 0;
+
+  if(info == 0)
+    return -1;
+
+  for(p = proc; p < &proc[NPROC]; p++){
+    acquire(&p->lock);
+
+    if(p->state != UNUSED){
+      info->inuse[i] = 1;
+      info->pid[i] = p->pid;
+      info->state[i] = p->state;
+      info->priority[i] = p->priority;
+      info->tickets[i] = p->tickets;
+      safestrcpy(info->name[i], p->name, PINFO_NAME_LEN);
+    } else {
+      info->inuse[i] = 0;
+      info->pid[i] = 0;
+      info->state[i] = UNUSED;
+      info->priority[i] = 0;
+      info->tickets[i] = 0;
+      info->name[i][0] = '\0';
+    }
+
+    release(&p->lock);
+    i++;
+  }
+
+  return 0;
 }
