@@ -135,6 +135,7 @@ UPROGS=\
 	$U/_ln\
 	$U/_ls\
 	$U/_ps\
+	$U/_test_getpinfo\
 	$U/_mkdir\
 	$U/_rm\
 	$U/_sh\
