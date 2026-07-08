@@ -123,6 +123,8 @@ allocproc(void)
 
 found:
   p->pid = allocpid();
+  p->priority = 50;
+  p->tickets = 1;
   p->state = USED;
 
   // Allocate a trapframe page.
