@@ -429,6 +429,7 @@ scheduler(void)
 {
   struct proc *p;
   struct cpu *c = mycpu();
+  int last_index = -1;
 
   c->proc = 0;
   for (;;) {
@@ -441,14 +442,34 @@ scheduler(void)
     intr_off();
 
     int found = 0;
-    for (p = proc; p < &proc[NPROC]; p++) {
+    int best_index = -1;
+    int best_priority = 101;
+
+    // Search the process table in a circular order. This keeps
+    // Round Robin behavior among processes with the same priority.
+    for (int offset = 1; offset <= NPROC; offset++) {
+      int index = (last_index + offset) % NPROC;
+      p = &proc[index];
+
       acquire(&p->lock);
-      if (p->state == RUNNABLE) {
+      if (p->state == RUNNABLE && p->priority < best_priority) {
+        best_priority = p->priority;
+        best_index = index;
+      }
+      release(&p->lock);
+    }
+
+    if (best_index != -1) {
+      p = &proc[best_index];
+      acquire(&p->lock);
+
+      if (p->state == RUNNABLE && p->priority == best_priority) {
         // Switch to chosen process.  It is the process's job
         // to release its lock and then reacquire it
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
+        last_index = best_index;
         swtch(&c->context, &p->context);
 
         // Process is done running for now.
@@ -456,9 +477,11 @@ scheduler(void)
         c->proc = 0;
         found = 1;
       }
+
       release(&p->lock);
     }
-    if (found == 0) {
+
+    if (found == 0 && best_index == -1) {
       // nothing to run; stop running on this core until an interrupt.
       asm volatile("wfi");
     }
@@ -727,4 +750,27 @@ getpinfo(struct pinfo *info)
   }
 
   return 0;
+}
+
+int
+setpriority(int pid, int priority)
+{
+  struct proc *p;
+
+  if(priority < 0 || priority > 100)
+    return -1;
+
+  for(p = proc; p < &proc[NPROC]; p++){
+    acquire(&p->lock);
+
+    if(p->pid == pid && p->state != UNUSED){
+      p->priority = priority;
+      release(&p->lock);
+      return 0;
+    }
+
+    release(&p->lock);
+  }
+
+  return -1;
 }
