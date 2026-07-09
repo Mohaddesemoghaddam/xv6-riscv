@@ -728,3 +728,26 @@ getpinfo(struct pinfo *info)
 
   return 0;
 }
+
+int
+setpriority(int pid, int priority)
+{
+  struct proc *p;
+
+  if(priority < 0 || priority > 100)
+    return -1;
+
+  for(p = proc; p < &proc[NPROC]; p++){
+    acquire(&p->lock);
+
+    if(p->pid == pid && p->state != UNUSED){
+      p->priority = priority;
+      release(&p->lock);
+      return 0;
+    }
+
+    release(&p->lock);
+  }
+
+  return -1;
+}
