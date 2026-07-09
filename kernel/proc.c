@@ -11,6 +11,11 @@ struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
 
+extern uint ticks;
+
+static uint lottery_seed = 1;
+static struct spinlock lottery_rand_lock;
+
 struct proc *initproc;
 
 int nextpid = 1;
@@ -51,6 +56,7 @@ procinit(void)
   struct proc *p;
 
   initlock(&pid_lock, "nextpid");
+  initlock(&lottery_rand_lock, "lottery_rand");
   initlock(&wait_lock, "wait_lock");
   for (p = proc; p < &proc[NPROC]; p++) {
     initlock(&p->lock, "proc");
@@ -791,4 +797,23 @@ settickets(int tickets)
   release(&p->lock);
 
   return 0;
+}
+
+uint
+lottery_rand(void)
+{
+  uint value;
+
+  acquire(&lottery_rand_lock);
+
+  lottery_seed = lottery_seed * 1664525 + 1013904223 + ticks;
+
+  if(lottery_seed == 0)
+    lottery_seed = ticks + 1;
+
+  value = lottery_seed;
+
+  release(&lottery_rand_lock);
+
+  return value;
 }
