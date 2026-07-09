@@ -11,6 +11,12 @@ struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
 
+extern uint ticks;
+
+static uint lottery_seed = 1;
+static struct spinlock lottery_rand_lock;
+uint lottery_rand(void);
+
 struct proc *initproc;
 
 int nextpid = 1;
@@ -51,6 +57,7 @@ procinit(void)
   struct proc *p;
 
   initlock(&pid_lock, "nextpid");
+  initlock(&lottery_rand_lock, "lottery_rand");
   initlock(&wait_lock, "wait_lock");
   for (p = proc; p < &proc[NPROC]; p++) {
     initlock(&p->lock, "proc");
@@ -285,6 +292,9 @@ kfork(void)
   // Cause fork to return 0 in the child.
   np->trapframe->a0 = 0;
 
+  // Inherit lottery tickets from parent.
+  np->tickets = p->tickets;
+
   // increment reference counts on open file descriptors.
   for (i = 0; i < NOFILE; i++)
     if (p->ofile[i])
@@ -429,7 +439,10 @@ scheduler(void)
 {
   struct proc *p;
   struct cpu *c = mycpu();
+
+#ifdef SCHED_PRIORITY
   int last_index = -1;
+#endif
 
   c->proc = 0;
   for (;;) {
@@ -441,6 +454,7 @@ scheduler(void)
     intr_on();
     intr_off();
 
+#ifdef SCHED_PRIORITY
     int found = 0;
     int best_index = -1;
     int best_priority = 101;
@@ -464,7 +478,7 @@ scheduler(void)
       acquire(&p->lock);
 
       if (p->state == RUNNABLE && p->priority == best_priority) {
-        // Switch to chosen process.  It is the process's job
+        // Switch to chosen process. It is the process's job
         // to release its lock and then reacquire it
         // before jumping back to us.
         p->state = RUNNING;
@@ -485,6 +499,62 @@ scheduler(void)
       // nothing to run; stop running on this core until an interrupt.
       asm volatile("wfi");
     }
+
+#elif defined(SCHED_LOTTERY)
+    int found = 0;
+    int total_tickets = 0;
+
+    // First pass: compute the total number of tickets among
+    // all runnable processes.
+    for (p = proc; p < &proc[NPROC]; p++) {
+      acquire(&p->lock);
+      if (p->state == RUNNABLE && p->tickets > 0)
+        total_tickets += p->tickets;
+      release(&p->lock);
+    }
+
+    if (total_tickets > 0) {
+      int winning_ticket = lottery_rand() % total_tickets;
+      int current_ticket = 0;
+
+      // Second pass: find the process whose ticket range contains
+      // the winning ticket.
+      for (p = proc; p < &proc[NPROC]; p++) {
+        acquire(&p->lock);
+
+        if (p->state == RUNNABLE && p->tickets > 0) {
+          current_ticket += p->tickets;
+
+          if (current_ticket > winning_ticket) {
+            // Switch to chosen process. It is the process's job
+            // to release its lock and then reacquire it
+            // before jumping back to us.
+            p->state = RUNNING;
+            c->proc = p;
+            swtch(&c->context, &p->context);
+
+            // Process is done running for now.
+            // It should have changed its p->state before coming back.
+            c->proc = 0;
+            found = 1;
+
+            release(&p->lock);
+            break;
+          }
+        }
+
+        release(&p->lock);
+      }
+    }
+
+    if (found == 0 && total_tickets == 0) {
+      // nothing to run; stop running on this core until an interrupt.
+      asm volatile("wfi");
+    }
+
+#else
+#error "No scheduler selected"
+#endif
   }
 }
 
@@ -773,4 +843,38 @@ setpriority(int pid, int priority)
   }
 
   return -1;
+}
+
+int
+settickets(int tickets)
+{
+  struct proc *p = myproc();
+
+  if(tickets < 1)
+    return -1;
+
+  acquire(&p->lock);
+  p->tickets = tickets;
+  release(&p->lock);
+
+  return 0;
+}
+
+uint
+lottery_rand(void)
+{
+  uint value;
+
+  acquire(&lottery_rand_lock);
+
+  lottery_seed = lottery_seed * 1664525 + 1013904223 + ticks;
+
+  if(lottery_seed == 0)
+    lottery_seed = ticks + 1;
+
+  value = lottery_seed;
+
+  release(&lottery_rand_lock);
+
+  return value;
 }
