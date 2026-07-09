@@ -136,6 +136,7 @@ UPROGS=\
 	$U/_ls\
 	$U/_ps\
 	$U/_chpri\
+	$U/_chtickets\
 	$U/_test_getpinfo\
 	$U/_priority_test\
 	$U/_mkdir\
