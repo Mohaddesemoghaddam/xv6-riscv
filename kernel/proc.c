@@ -777,3 +777,18 @@ setpriority(int pid, int priority)
 
   return -1;
 }
+
+int
+settickets(int tickets)
+{
+  struct proc *p = myproc();
+
+  if(tickets < 1)
+    return -1;
+
+  acquire(&p->lock);
+  p->tickets = tickets;
+  release(&p->lock);
+
+  return 0;
+}
