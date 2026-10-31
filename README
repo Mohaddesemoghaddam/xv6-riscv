@@ -1,48 +1,94 @@
-xv6 is a re-implementation of Dennis Ritchie's and Ken Thompson's Unix
-Version 6 (v6).  xv6 loosely follows the structure and style of v6,
-but is implemented for a modern RISC-V multiprocessor using ANSI C.
+# xv6-RISC-V: Priority and Lottery CPU Scheduling
 
-ACKNOWLEDGMENTS
+An extension of the [xv6](https://github.com/mit-pdos/xv6-riscv) teaching operating system (RISC-V) with two new **CPU scheduling policies**, new **system calls** for process control and monitoring, and **user-level tools and tests** for scheduling behavior.
 
-xv6 is inspired by John Lions's Commentary on UNIX 6th Edition (Peer
-to Peer Communications; ISBN: 1-57398-013-7; 1st edition (June 14,
-2000)).  See also https://pdos.csail.mit.edu/6.1810/, which provides
-pointers to on-line resources for v6.
+## Features
 
-The following people have made contributions: Russ Cox (context switching,
-locking), Cliff Frey (MP), Xiao Yu (MP), Nickolai Zeldovich, and Austin
-Clements.
+- **Priority scheduler:** always runs the highest-priority runnable process, with round-robin among processes of equal priority
+- **Lottery scheduler:** proportional-share scheduling, where each process wins the CPU with probability proportional to its tickets
+- **Compile-time selection** between the two policies through a `make` variable
+- **New system calls:** `setpriority`, `settickets`, and `getpinfo`
+- **User programs:** `ps`, `chpri`, `chtickets`, and dedicated scheduling tests
 
-We are also grateful for the bug reports and patches contributed by
-Abhinavpatel00, Takahiro Aoyagi, Marcelo Arroyo, Hirbod Behnam, Silas
-Boyd-Wickizer, Anton Burtsev, carlclone, Ian Chen, clivezeng, Dan
-Cross, Cody Cutler, Mike CAT, Tej Chajed, Asami Doi,Wenyang Duan,
-echtwerner, eyalz800, Nelson Elhage, Saar Ettinger, Alice Ferrazzi,
-Nathaniel Filardo, flespark, Peter Froehlich, Yakir Goaron, Shivam
-Handa, Matt Harvey, Bryan Henry, jaichenhengjie, Jim Huang, Matúš
-Jókay, John Jolly, Alexander Kapshuk, Anders Kaseorg, kehao95,
-Wolfgang Keller, Jungwoo Kim, Jonathan Kimmitt, Eddie Kohler, Vadim
-Kolontsov, Austin Liew, Bruce Lowekamp, l0stman, Pavan Maddamsetti,
-Imbar Marinescu, Yandong Mao, Matan Shabtay, Hitoshi Mitake, Carmi
-Merimovich, mes900903, Mark Morrissey, mtasm, Joel Nider, Hayato Ohhashi,
-OptimisticSide, papparapa, phosphagos, Harry Porter, Greg Price, Zheng
-qhuo, Quancheng, RayAndrew, Jude Rich, segfault, Ayan Shafqat, Eldar
-Sehayek, Yongming Shen, Fumiya Shigemitsu, snoire, Taojie, Cam Tenny,
-tyfkda, Warren Toomey, Stephen Tu, Alissa Tung, Rafael Ubal, unicornx,
-Amane Uehara, Pablo Ventura, Luc Videau, Xi Wang, WaheedHafez, Keiichi
-Watanabe, Lucas Wolf, Nicolas Wolovick, wxdao, Grant Wu, x653, Andy
-Zhang, Jindong Zhang, Icenowy Zheng, ZhUyU1997, and Zou Chang Wei.
+## Scheduling policies
 
-ERROR REPORTS
+### Priority scheduling
 
-Please send errors and suggestions to Frans Kaashoek and Robert Morris
-(kaashoek,rtm@mit.edu).  The main purpose of xv6 is as a teaching
-operating system for MIT's 6.1810, so we are more interested in
-simplifications and clarifications than new features.
+Each process has a priority from **0 to 100**, where a **lower value means higher priority** (default: 50). On every scheduling decision, the scheduler scans the process table in **circular order** starting after the last scheduled process and selects the runnable process with the best priority. The circular scan gives **round-robin fairness** among processes with the same priority.
 
-BUILDING AND RUNNING XV6
+### Lottery scheduling
 
-You will need a RISC-V "newlib" tool chain from
-https://github.com/riscv/riscv-gnu-toolchain, and qemu compiled for
-riscv64-softmmu.  Once they are installed, and in your shell
-search path, you can run "make qemu".
+Each process holds a number of **tickets** (default: 1; child processes inherit their parent's tickets). On every scheduling decision, the scheduler:
+
+1. sums the tickets of all runnable processes,
+2. draws a random winning ticket with a lock-protected pseudo-random generator,
+3. runs the process whose ticket range contains the winning ticket.
+
+Over time, each process receives CPU time **in proportion to its share of tickets**.
+
+## System calls
+
+| System call | Description |
+|---|---|
+| `int setpriority(int pid, int priority)` | Sets the priority (0–100) of the process with the given PID |
+| `int settickets(int tickets)` | Sets the number of lottery tickets (≥ 1) of the calling process |
+| `int getpinfo(struct pinfo *info)` | Returns a snapshot of the process table: PID, state, priority, tickets, and name of each process |
+
+All process-table accesses are protected by per-process locks.
+
+## User programs
+
+| Program | Usage | Description |
+|---|---|---|
+| `ps` | `ps` | Lists processes with PID, state, priority, tickets, and name |
+| `chpri` | `chpri <pid> <priority>` | Changes the priority of a process |
+| `chtickets` | `chtickets <tickets>` | Changes the tickets of the current process |
+| `priority_test` | `priority_test` | Demonstrates priority-based scheduling |
+| `lottery_test` | `lottery_test` | Demonstrates proportional CPU sharing under lottery scheduling |
+| `test_getpinfo` | `test_getpinfo` | Tests the `getpinfo` system call |
+
+## Building and running
+
+**Requirements:** a RISC-V GNU toolchain ([riscv-gnu-toolchain](https://github.com/riscv/riscv-gnu-toolchain)) and QEMU built for `riscv64-softmmu`.
+
+Run with the **priority scheduler** (default):
+
+```bash
+make qemu
+```
+
+Run with the **lottery scheduler**:
+
+```bash
+make clean
+make qemu SCHEDULER=LOTTERY
+```
+
+Run `make clean` whenever you switch between schedulers so the kernel is rebuilt with the new policy.
+
+Inside xv6, try:
+
+```text
+$ ps
+$ priority_test
+$ lottery_test
+```
+
+## Implementation overview
+
+| File | Changes |
+|---|---|
+| `Makefile` | `SCHEDULER` variable (`PRIORITY` or `LOTTERY`) and new user programs |
+| `kernel/proc.h` | `priority` and `tickets` fields in `struct proc` |
+| `kernel/proc.c` | Both scheduler implementations, `setpriority`, `settickets`, `getpinfo`, random number generator, ticket inheritance in `fork` |
+| `kernel/pinfo.h` | `struct pinfo` for process-table snapshots |
+| `kernel/sysproc.c`, `kernel/syscall.c`, `kernel/syscall.h` | System call wrappers and registration |
+| `user/user.h`, `user/usys.pl` | User-space system call interface |
+| `user/ps.c`, `user/chpri.c`, `user/chtickets.c` | Process monitoring and control tools |
+| `user/priority_test.c`, `user/lottery_test.c`, `user/test_getpinfo.c` | Scheduling tests |
+
+## About xv6
+
+xv6 is a re-implementation of Unix Version 6 for a modern RISC-V multiprocessor, developed at MIT for the 6.1810 operating systems course. The original xv6 README, acknowledgments, and license are kept in this repository.
+
+**Author of the scheduling extensions:** Mohaddese Moghaddam
